@@ -29,7 +29,7 @@ export default {
       gravity: 1.5,
       
       // Præcis tærskel i decibel, som ønsket
-      dbThreshold: 80, // ÆNDRET: Værdien er nu sat til 70
+      dbThreshold: 70, // ÆNDRET: Værdien er nu sat til 70
     };
   },
   methods: {
