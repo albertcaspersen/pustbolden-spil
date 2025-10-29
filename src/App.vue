@@ -38,7 +38,7 @@ export default {
       bounceDamping: 0.75, // Dæmper hoppet ved nedslag
       wallBounceDamping: 0.75, // Dæmper ved vægstød (lavere = mindre bounce)
       airResistance: 0.97, // Luftmodstand (tættere på 1.0 = mindre modstand)
-      dbThreshold: 82,
+      dbThreshold: 52,
       
       // Animations variabler
       animationId: null,
