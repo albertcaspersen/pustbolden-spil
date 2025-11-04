@@ -44,7 +44,7 @@ export default {
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
       airResistance: 0.97,
-      energyThreshold: 15, // Sænket så den reagerer på realistisk energi
+      energyThreshold: 25, // Sænket så den reagerer på realistisk energi
       minHighHz: 3000,
       maxHighHz: 8000,
       
