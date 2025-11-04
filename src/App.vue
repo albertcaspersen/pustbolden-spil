@@ -44,7 +44,9 @@ export default {
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
       airResistance: 0.97,
-      energyThreshold: 50,
+      energyThreshold: 15, // Sænket så den reagerer på realistisk energi
+      minHighHz: 3000,
+      maxHighHz: 8000,
       
       // Animations-variabler
       animationId: null,
@@ -114,18 +116,21 @@ export default {
     },
     
     calculateHighFrequencyEnergy(analyserNode) {
-      const bufferLength = analyserNode.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+      const binCount = analyserNode.frequencyBinCount; // fftSize/2
+      const dataArray = new Uint8Array(binCount);
       analyserNode.getByteFrequencyData(dataArray);
 
-      const startBin = 200;
-      const endBin = 800;
-      const numberOfBins = endBin - startBin;
+      // Kortlæg ønsket Hz-interval til bin-indeks
+      const nyquist = (this.audioContext?.sampleRate || 44100) / 2;
+      const binSizeHz = nyquist / binCount; // Hz per bin
+      const startBin = Math.max(0, Math.floor(this.minHighHz / binSizeHz));
+      const endBin = Math.min(binCount, Math.ceil(this.maxHighHz / binSizeHz));
+
+      const numberOfBins = Math.max(1, endBin - startBin);
       let sumOfEnergy = 0;
       for (let i = startBin; i < endBin; i++) {
-        sumOfEnergy += dataArray[i];
+        sumOfEnergy += dataArray[i]; // 0..255
       }
-      
       const averageEnergy = sumOfEnergy / numberOfBins;
       return isNaN(averageEnergy) ? 0 : averageEnergy;
     },
