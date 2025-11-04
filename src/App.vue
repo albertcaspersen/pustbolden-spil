@@ -7,11 +7,7 @@
         <div class="ball" ref="ballElement"></div>
       </div>
       
-      <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
-
-      <div v-if="calibrating">
-        <p>Kalibrerer baggrundsstøj... sig ikke noget 😊</p>
-      </div>
+      <button @click="startGame" v-if="!gameStarted">Start Spil</button>
 
       <div v-if="gameStarted">
         <p>Blæs i mikrofonen for at holde bolden i luften!</p>
@@ -32,12 +28,11 @@ export default {
   data() {
     return {
       gameStarted: false,
-      calibrating: false,
       audioContext: null,
       analyser: null,
       highFrequencyEnergy: 0,
-      baselineEnergy: 0,
-      baselineReady: false,
+      baselineEnergy: 20, // fast baseline (du kan genaktivere automatisk senere)
+      baselineReady: true,
       prevEnergy: 0,
       lastPuffTime: 0,
       errorMsg: null,
@@ -52,12 +47,12 @@ export default {
       wallBounceDamping: 0.75,
       airResistance: 0.97,
 
-      // Nye detektionsparametre
-      minHighHz: 2000,
-      maxHighHz: 4000,
-      deltaThreshold: 8,
-      relativeEnergyThreshold: 15,
-      puffCooldown: 400, // ms mellem pust
+      // Justerede lydparametre
+      minHighHz: 1000,
+      maxHighHz: 8000,
+      relativeEnergyThreshold: 10,
+      deltaThreshold: 5,
+      puffCooldown: 300, // ms mellem pust
 
       animationId: null,
       ballSetterX: null,
@@ -92,7 +87,7 @@ export default {
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        // 🎧 Tilføj bandpass-filter
+        // 🎧 Bandpass-filter
         const source = this.audioContext.createMediaStreamSource(stream);
         const bandpass = this.audioContext.createBiquadFilter();
         bandpass.type = "bandpass";
@@ -106,9 +101,10 @@ export default {
         source.connect(bandpass);
         bandpass.connect(this.analyser);
 
-        this.calibrating = true;
-        await this.measureBaseline();
-        this.calibrating = false;
+        // 🔥 Vi springer kalibrering over under test
+        this.baselineEnergy = 20;
+        this.baselineReady = true;
+
         this.gameStarted = true;
         this.gameLoop();
       } catch (error) {
@@ -130,31 +126,6 @@ export default {
             "Kunne ikke starte spillet. Tjek dine browserindstillinger og tilladelser.";
         }
       }
-    },
-
-    // 🔊 Kalibrering af baggrundsstøj
-    measureBaseline() {
-      return new Promise((resolve) => {
-        const samples = [];
-        const duration = 2000;
-        const start = performance.now();
-
-        const collect = () => {
-          const e = this.calculateHighFrequencyEnergy(this.analyser);
-          samples.push(e);
-          if (performance.now() - start < duration) {
-            requestAnimationFrame(collect);
-          } else {
-            const avg =
-              samples.reduce((a, b) => a + b, 0) / samples.length || 0;
-            this.baselineEnergy = avg;
-            this.baselineReady = true;
-            console.log("🎚️ Baseline:", avg.toFixed(1));
-            resolve();
-          }
-        };
-        collect();
-      });
     },
 
     calculateHighFrequencyEnergy(analyserNode) {
@@ -207,8 +178,7 @@ export default {
       const update = () => {
         const now = performance.now();
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
-        const smoothed =
-          0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
+        const smoothed = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
         const deltaE = smoothed - this.prevEnergy;
         this.prevEnergy = smoothed;
         this.highFrequencyEnergy = smoothed;
@@ -349,3 +319,4 @@ button {
   cursor: pointer;
 }
 </style>
+
