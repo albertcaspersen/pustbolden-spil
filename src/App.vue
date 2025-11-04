@@ -7,15 +7,17 @@
         <div class="ball" ref="ballElement"></div>
       </div>
       
-      <!-- Knappen vises kun før spillet starter -->
-      <button @click="startGame" v-if="!gameStarted">Start Spil</button>
-      
-      <div v-if="gameStarted">
-        <p>Blæs i mikrofonen for at holde bolden i luften!</p>
-        <p>Højfrekvent Energi: {{ highFrequencyEnergy.toFixed(1) }}</p>
+      <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
+
+      <div v-if="calibrating">
+        <p>Kalibrerer baggrundsstøj... sig ikke noget 😊</p>
       </div>
 
-      <!-- Viser en fejlbesked på skærmen, hvis noget går galt. Meget nyttigt til mobil debugging! -->
+      <div v-if="gameStarted">
+        <p>Blæs i mikrofonen for at holde bolden i luften!</p>
+        <p>Lydenergi: {{ highFrequencyEnergy.toFixed(1) }}</p>
+      </div>
+
       <div v-if="errorMsg" class="error-message">
         <p><strong>Fejl:</strong> {{ errorMsg }}</p>
       </div>
@@ -24,18 +26,23 @@
 </template>
 
 <script>
-import { gsap } from 'gsap';
+import { gsap } from "gsap";
 
 export default {
   data() {
     return {
       gameStarted: false,
+      calibrating: false,
       audioContext: null,
       analyser: null,
       highFrequencyEnergy: 0,
-      errorMsg: null, // Til at vise fejl på skærmen
-      
-      // Fysik-variabler
+      baselineEnergy: 0,
+      baselineReady: false,
+      prevEnergy: 0,
+      lastPuffTime: 0,
+      errorMsg: null,
+
+      // Fysik
       ballX: 50,
       ballY: 10,
       velocityX: 0,
@@ -44,11 +51,14 @@ export default {
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
       airResistance: 0.97,
-      energyThreshold: 30, // Sænket så den reagerer på realistisk energi
-      minHighHz: 3000,
-      maxHighHz: 8000,
-      
-      // Animations-variabler
+
+      // Nye detektionsparametre
+      minHighHz: 2000,
+      maxHighHz: 4000,
+      deltaThreshold: 8,
+      relativeEnergyThreshold: 15,
+      puffCooldown: 400, // ms mellem pust
+
       animationId: null,
       ballSetterX: null,
       ballSetterY: null,
@@ -56,94 +66,121 @@ export default {
       ballEjected: false,
     };
   },
+
   mounted() {
     this.setBallPosition(50, 10);
   },
-  beforeUnmount() {
-    if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
-    }
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close();
-    }
-  },
-  methods: {
-    // OPDATERET OG MERE ROBUST STARTGAME-METODE
-    async startGame() {
-      this.errorMsg = null; // Nulstil eventuelle gamle fejl
 
+  beforeUnmount() {
+    if (this.animationId) cancelAnimationFrame(this.animationId);
+    if (this.audioContext && this.audioContext.state !== "closed")
+      this.audioContext.close();
+  },
+
+  methods: {
+    async startGame() {
+      this.errorMsg = null;
       try {
-        // 1. Opret eller genoptag AudioContext ved bruger-klik (vigtigt for mobil!)
         if (!this.audioContext) {
-          this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          this.audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
         }
 
-        // Hvis context er "suspenderet", skal den genoptages
-        if (this.audioContext.state === 'suspended') {
+        if (this.audioContext.state === "suspended") {
           await this.audioContext.resume();
         }
 
-        // 2. Anmod om mikrofonadgang (kræver HTTPS)
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-        // 3. Sæt lydanalysen op
+        // 🎧 Tilføj bandpass-filter
+        const source = this.audioContext.createMediaStreamSource(stream);
+        const bandpass = this.audioContext.createBiquadFilter();
+        bandpass.type = "bandpass";
+        bandpass.frequency.value = 3000;
+        bandpass.Q.value = 1.5;
+
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 2048;
-        this.analyser.minDecibels = -90;
-        this.analyser.maxDecibels = -10;
         this.analyser.smoothingTimeConstant = 0.15;
 
-        const source = this.audioContext.createMediaStreamSource(stream);
-        source.connect(this.analyser);
-        
-        // 4. Start spillet
+        source.connect(bandpass);
+        bandpass.connect(this.analyser);
+
+        this.calibrating = true;
+        await this.measureBaseline();
+        this.calibrating = false;
         this.gameStarted = true;
         this.gameLoop();
-
       } catch (error) {
         console.error("Fejl ved start af spil:", error);
-        // Gør fejlen synlig på skærmen
-        if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        if (
+          error.name === "NotAllowedError" ||
+          error.name === "PermissionDeniedError"
+        ) {
           this.errorMsg = "Du skal give adgang til mikrofonen for at spille.";
-        } else if (error.name === 'NotFoundError') {
+        } else if (error.name === "NotFoundError") {
           this.errorMsg = "Ingen mikrofon fundet på din enhed.";
-        } else if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') {
-           this.errorMsg = "Mikrofonadgang kræver en sikker forbindelse (HTTPS).";
+        } else if (
+          window.location.protocol !== "https:" &&
+          window.location.hostname !== "localhost"
+        ) {
+          this.errorMsg = "Mikrofonadgang kræver en sikker forbindelse (HTTPS).";
         } else {
-          this.errorMsg = "Kunne ikke starte spillet. Tjek dine browser-indstillinger og tilladelser.";
+          this.errorMsg =
+            "Kunne ikke starte spillet. Tjek dine browserindstillinger og tilladelser.";
         }
       }
     },
-    
+
+    // 🔊 Kalibrering af baggrundsstøj
+    measureBaseline() {
+      return new Promise((resolve) => {
+        const samples = [];
+        const duration = 2000;
+        const start = performance.now();
+
+        const collect = () => {
+          const e = this.calculateHighFrequencyEnergy(this.analyser);
+          samples.push(e);
+          if (performance.now() - start < duration) {
+            requestAnimationFrame(collect);
+          } else {
+            const avg =
+              samples.reduce((a, b) => a + b, 0) / samples.length || 0;
+            this.baselineEnergy = avg;
+            this.baselineReady = true;
+            console.log("🎚️ Baseline:", avg.toFixed(1));
+            resolve();
+          }
+        };
+        collect();
+      });
+    },
+
     calculateHighFrequencyEnergy(analyserNode) {
-      const binCount = analyserNode.frequencyBinCount; // fftSize/2
+      const binCount = analyserNode.frequencyBinCount;
       const dataArray = new Uint8Array(binCount);
       analyserNode.getByteFrequencyData(dataArray);
 
-      // Kortlæg ønsket Hz-interval til bin-indeks
       const nyquist = (this.audioContext?.sampleRate || 44100) / 2;
-      const binSizeHz = nyquist / binCount; // Hz per bin
+      const binSizeHz = nyquist / binCount;
       const startBin = Math.max(0, Math.floor(this.minHighHz / binSizeHz));
       const endBin = Math.min(binCount, Math.ceil(this.maxHighHz / binSizeHz));
 
-      const numberOfBins = Math.max(1, endBin - startBin);
-      let sumOfEnergy = 0;
-      for (let i = startBin; i < endBin; i++) {
-        sumOfEnergy += dataArray[i]; // 0..255
-      }
-      const averageEnergy = sumOfEnergy / numberOfBins;
-      return isNaN(averageEnergy) ? 0 : averageEnergy;
+      let sum = 0;
+      for (let i = startBin; i < endBin; i++) sum += dataArray[i];
+      return sum / (endBin - startBin);
     },
 
     setBallPosition(x, y) {
       if (!this.$refs.ballElement) return;
       if (!this.ballSetterX) {
-        this.$refs.ballElement.style.transform = 'none';
-        this.ballSetterX = gsap.quickSetter(this.$refs.ballElement, 'left', '%');
-        this.ballSetterY = gsap.quickSetter(this.$refs.ballElement, 'bottom', 'px');
+        this.$refs.ballElement.style.transform = "none";
+        this.ballSetterX = gsap.quickSetter(this.$refs.ballElement, "left", "%");
+        this.ballSetterY = gsap.quickSetter(this.$refs.ballElement, "bottom", "px");
       }
       const glassWidth = 100;
-      const leftPercent = x - (this.ballRadius / glassWidth * 100);
+      const leftPercent = x - (this.ballRadius / glassWidth) * 100;
       this.ballSetterX(leftPercent);
       this.ballSetterY(y);
     },
@@ -158,8 +195,6 @@ export default {
     },
 
     gameLoop() {
-      // ... (Resten af din gameLoop-kode er fin og behøver ingen ændringer)
-      // ... (Kopieret fra din oprindelige kode for fuldstændighedens skyld)
       const glassWidth = 100;
       const glassHeight = 200;
       const minY = 10;
@@ -168,27 +203,40 @@ export default {
       const minX = (this.ballRadius / glassWidth) * 100;
       const maxX = 100 - minX;
       const viewportBottom = -150;
-      
+
       const update = () => {
-        this.highFrequencyEnergy = this.calculateHighFrequencyEnergy(this.analyser);
+        const now = performance.now();
+        const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
+        const smoothed =
+          0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
+        const deltaE = smoothed - this.prevEnergy;
+        this.prevEnergy = smoothed;
+        this.highFrequencyEnergy = smoothed;
+
+        const relativeEnergy = smoothed - this.baselineEnergy;
         const isOutsideGlass = this.ballX < minX || this.ballX > maxX;
-        
-        if (this.highFrequencyEnergy > this.energyThreshold && this.ballY < maxHeight && !isOutsideGlass && !this.ballEjected) {
-          const forceStrength = (this.highFrequencyEnergy - this.energyThreshold) / 50;
-          this.velocityY += forceStrength * 0.7;
-          
-          if (Math.abs(this.velocityY) > 2 && this.ballX >= minX && this.ballX <= maxX) {
-            this.velocityX += (Math.random() - 0.5) * 0.3;
-          }
+
+        // 💨 Detekter pust
+        if (
+          relativeEnergy > this.relativeEnergyThreshold &&
+          deltaE > this.deltaThreshold &&
+          now - this.lastPuffTime > this.puffCooldown &&
+          this.ballY < maxHeight &&
+          !isOutsideGlass &&
+          !this.ballEjected
+        ) {
+          const forceStrength = (relativeEnergy - this.relativeEnergyThreshold) / 40;
+          this.velocityY += forceStrength * 0.8;
+          this.velocityX += (Math.random() - 0.5) * 0.4;
+          this.lastPuffTime = now;
         }
 
         this.velocityX *= this.airResistance;
         this.velocityY *= this.airResistance;
-        if (this.ballY <= minY + 5) this.velocityX *= 0.9;
         this.velocityY -= this.gravity;
         this.ballX += this.velocityX;
         this.ballY += this.velocityY;
-        
+
         if (this.ballY > maxHeight) {
           this.ballY = maxHeight;
           if (this.velocityY > 0) this.velocityY = 0;
@@ -196,12 +244,12 @@ export default {
 
         if (!this.ballEjected && this.ballY >= glassTop && this.ballY < glassTop + 10) {
           this.ballEjected = true;
-          const pushDirection = this.ballX < 50 ? -1 : 1;
-          this.velocityX = pushDirection * (8 + Math.random() * 2);
+          const pushDir = this.ballX < 50 ? -1 : 1;
+          this.velocityX = pushDir * (8 + Math.random() * 2);
           this.ballY = glassTop + 5;
         }
 
-        if (!isOutsideGlass && !this.ballEjected && this.ballY >= minY && this.ballY <= glassTop + 50) {
+        if (!isOutsideGlass && !this.ballEjected && this.ballY >= minY) {
           if (this.ballX <= minX) {
             this.ballX = minX;
             this.velocityX = -this.velocityX * this.wallBounceDamping;
@@ -211,30 +259,15 @@ export default {
           }
         }
 
-        if (!isOutsideGlass && !this.ballEjected && this.ballY <= minY && this.ballY >= viewportBottom && this.ballX >= minX && this.ballX <= maxX) {
+        if (!this.ballEjected && this.ballY <= minY) {
           this.ballY = minY;
           if (this.velocityY < 0) {
             this.velocityY = -this.velocityY * this.bounceDamping;
-            if (Math.abs(this.velocityY) > 3) this.velocityX += (Math.random() - 0.8) * 0.8;
-            if (Math.abs(this.velocityY) < 1.0) {
-              this.velocityY = 0;
-              this.velocityX *= 0.8;
-              if (Math.abs(this.velocityX) < 0.3) this.velocityX = 0;
-            }
+            if (Math.abs(this.velocityY) < 1.0) this.velocityY = 0;
           }
         }
 
-        if (this.ballEjected && this.ballY < glassTop && this.ballY > minY) {
-          if (this.ballX >= minX && this.ballX <= maxX) {
-            const pushAway = this.ballX < 50 ? -3 : 3;
-            this.velocityX = pushAway;
-            this.ballX = this.ballX < 50 ? minX - 5 : maxX + 5;
-          }
-        }
-
-        if (this.ballY < viewportBottom) {
-          this.spawnNewBall();
-        }
+        if (this.ballY < viewportBottom) this.spawnNewBall();
 
         this.setBallPosition(this.ballX, this.ballY);
         this.animationId = requestAnimationFrame(update);
@@ -246,13 +279,11 @@ export default {
 </script>
 
 <style>
-/* ... din CSS er fin ... */
-/* Tilføj stil for fejlbeskeden */
 .error-message {
   margin-top: 20px;
   padding: 10px;
-  color: #D8000C; /* Mørkerød tekst */
-  background-color: #FFD2D2; /* Lys rød baggrund */
+  color: #D8000C;
+  background-color: #FFD2D2;
   border: 1px solid #D8000C;
   border-radius: 5px;
   max-width: 300px;
@@ -289,7 +320,6 @@ export default {
   background-color: rgba(33, 150, 243, 0.15);
   border: 2px dashed rgba(33, 150, 243, 0.4);
   pointer-events: none;
-  z-index: 0;
 }
 
 .safe-zone {
@@ -299,21 +329,17 @@ export default {
   border-top: 2px dashed rgba(76, 175, 80, 0.5);
   border-bottom: 2px dashed rgba(76, 175, 80, 0.5);
   pointer-events: none;
-  z-index: 1;
 }
 
 .ball {
-  width: 30px; height: 30px;
+  width: 30px;
+  height: 30px;
   background-color: red;
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
   border-radius: 50%;
   position: absolute;
-  left: 35%; bottom: 10px;
-  transition: none;
+  left: 35%;
+  bottom: 10px;
   will-change: left, bottom;
-  z-index: 2;
 }
 
 button {
