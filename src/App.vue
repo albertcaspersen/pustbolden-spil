@@ -19,6 +19,11 @@
           <p><strong>Debug Info</strong></p>
           <p>Lydenergi: {{ highFrequencyEnergy.toFixed(1) }}</p>
           <p>Baseline: {{ baselineEnergy.toFixed(1) }}</p>
+          <p>Relativ Energi: 
+            <span :class="{ positive: relativeEnergy > 0, negative: relativeEnergy < 0 }">
+              {{ relativeEnergy.toFixed(1) }}
+            </span>
+          </p>
           <p>Varighed over threshold: {{ blowDuration }} ms</p>
           <p>Pust aktivt: <strong>{{ isBlowing ? "💨" : "..." }}</strong></p>
           <p>Registreret pust: <strong>{{ puffDetected ? "✅" : "—" }}</strong></p>
@@ -48,15 +53,15 @@ export default {
       analyser: null,
       highFrequencyEnergy: 0,
       baselineEnergy: 0,
+      relativeEnergy: 0,
       baselineReady: false,
-      prevEnergy: 0,
 
       // Pust-detektion
       isBlowing: false,
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 500, // <-- kræv minimum 500 ms over threshold
+      minBlowDuration: 500, // min. 500 ms før pust registreres
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -182,13 +187,17 @@ export default {
     },
 
     detectBlow(now, energy) {
-      const relative = energy - this.baselineEnergy;
-
-      // Dynamisk baseline justering
+      // Opdater baseline dynamisk
       this.baselineEnergy =
         this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
 
-      if (relative > this.relativeEnergyThreshold) {
+      // Beregn relativ energi (kan gå i minus)
+      this.relativeEnergy = energy - this.baselineEnergy;
+
+      // Bestem om energien er over tærsklen
+      const aboveThreshold = this.relativeEnergy > this.relativeEnergyThreshold;
+
+      if (aboveThreshold) {
         if (!this.isBlowing) {
           this.isBlowing = true;
           this.blowStartTime = now;
@@ -199,7 +208,7 @@ export default {
         this.blowDuration = 0;
       }
 
-      // Kun pust hvis energien har varet mindst 500 ms
+      // Kræv min. 500 ms før pust registreres
       if (
         this.isBlowing &&
         this.blowDuration > this.minBlowDuration &&
@@ -228,8 +237,8 @@ export default {
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
         this.highFrequencyEnergy = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
 
-        // Pustdetektion
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
+
         if (blowDetected && this.ballY < maxHeight) {
           const force = (this.highFrequencyEnergy - this.baselineEnergy) / 40;
           this.velocityY += force;
@@ -302,6 +311,12 @@ export default {
   background: #f9f9f9;
   border-radius: 6px;
   text-align: left;
+}
+.debug-panel .positive {
+  color: green;
+}
+.debug-panel .negative {
+  color: #c00;
 }
 .error-message {
   color: #D8000C;
