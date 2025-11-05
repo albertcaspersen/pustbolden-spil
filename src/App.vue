@@ -7,31 +7,24 @@
         <div class="ball" ref="ballElement"></div>
       </div>
 
-      <!-- Start-knap -->
       <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
 
-      <!-- Kalibreringsbesked -->
       <div v-if="calibrating">
         <p>🤫 Kalibrerer... vær stille i 2 sekunder</p>
       </div>
 
-      <!-- Spil og debugpanel -->
       <div v-if="gameStarted">
         <p>🎯 Blæs i mikrofonen for at holde bolden i luften!</p>
-
-        <!-- Debug info -->
         <div class="debug-panel">
           <p><strong>Debug Info</strong></p>
           <p>Lydenergi: {{ highFrequencyEnergy.toFixed(1) }}</p>
           <p>Baseline: {{ baselineEnergy.toFixed(1) }}</p>
-          <p>Relative Energi: {{ (highFrequencyEnergy - baselineEnergy).toFixed(1) }}</p>
-          <p>DeltaE: {{ (highFrequencyEnergy - prevEnergy).toFixed(1) }}</p>
-          <p>Threshold (Rel/Δ): {{ relativeEnergyThreshold }} / {{ deltaThreshold }}</p>
-          <p>Pust-Status: <strong>{{ isBlowing ? "💨 Registreret" : "..." }}</strong></p>
+          <p>Varighed over threshold: {{ blowDuration }} ms</p>
+          <p>Pust aktivt: <strong>{{ isBlowing ? "💨" : "..." }}</strong></p>
+          <p>Registreret pust: <strong>{{ puffDetected ? "✅" : "—" }}</strong></p>
         </div>
       </div>
 
-      <!-- Fejlbesked -->
       <div v-if="errorMsg" class="error-message">
         <p><strong>Fejl:</strong> {{ errorMsg }}</p>
       </div>
@@ -45,7 +38,7 @@ import { gsap } from "gsap";
 export default {
   data() {
     return {
-      // Spiltilstand
+      // Tilstand
       gameStarted: false,
       calibrating: false,
       errorMsg: null,
@@ -57,29 +50,32 @@ export default {
       baselineEnergy: 0,
       baselineReady: false,
       prevEnergy: 0,
-      lastPuffTime: 0,
-      isBlowing: false,
 
-      // Boldfysik
+      // Pust-detektion
+      isBlowing: false,
+      puffDetected: false,
+      blowStartTime: 0,
+      blowDuration: 0,
+      minBlowDuration: 100, // kræv min. 100 ms høj energi
+      puffCooldown: 500,
+      lastPuffTime: 0,
+
+      // Fysik
       ballX: 50,
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.06,
+      gravity: 0.1,
       bounceDamping: 0.75,
-      wallBounceDamping: 0.75,
-      airResistance: 0.985,
+      airResistance: 0.97,
       ballRadius: 15,
       ballEjected: false,
 
       // Parametre
-      minHighHz: 1000,
+      minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 6,
-      deltaThreshold: 3,
-      puffCooldown: 150,
-      smoothingFactor: 0.995, // baseline justering
-      noiseFloorClamp: 0.05,
+      relativeEnergyThreshold: 10,
+      smoothingFactor: 0.995,
 
       // Animation
       animationId: null,
@@ -103,10 +99,8 @@ export default {
       this.errorMsg = null;
       try {
         if (!this.audioContext) {
-          this.audioContext = new (window.AudioContext ||
-            window.webkitAudioContext)();
+          this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
-
         if (this.audioContext.state === "suspended") {
           await this.audioContext.resume();
         }
@@ -114,75 +108,53 @@ export default {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const source = this.audioContext.createMediaStreamSource(stream);
 
+        // Bandpass – fokuser på pustefrekvenser (2–8 kHz)
         const bandpass = this.audioContext.createBiquadFilter();
         bandpass.type = "bandpass";
-        bandpass.frequency.value = 3000;
+        bandpass.frequency.value = 4000;
         bandpass.Q.value = 1.5;
 
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 2048;
-        this.analyser.smoothingTimeConstant = 0.15;
+        this.analyser.smoothingTimeConstant = 0.2;
 
         source.connect(bandpass);
         bandpass.connect(this.analyser);
 
-        // Kalibrer først
+        // Kalibrer baggrundsstøj
         this.calibrating = true;
         await this.measureBaseline();
         this.calibrating = false;
         this.baselineReady = true;
-
         this.gameStarted = true;
+
         this.gameLoop();
       } catch (error) {
-        console.error("Fejl ved start:", error);
-        if (
-          error.name === "NotAllowedError" ||
-          error.name === "PermissionDeniedError"
-        ) {
-          this.errorMsg = "Du skal give adgang til mikrofonen for at spille.";
-        } else if (error.name === "NotFoundError") {
-          this.errorMsg = "Ingen mikrofon fundet på din enhed.";
-        } else if (
-          window.location.protocol !== "https:" &&
-          window.location.hostname !== "localhost"
-        ) {
-          this.errorMsg = "Mikrofonadgang kræver en sikker (HTTPS) forbindelse.";
-        } else {
-          this.errorMsg =
-            "Kunne ikke starte spillet. Tjek browserens tilladelser.";
-        }
+        console.error("Fejl:", error);
+        this.errorMsg = "Fejl i mikrofontilladelse eller opsætning.";
       }
     },
 
     async measureBaseline() {
       return new Promise((resolve) => {
         const samples = [];
-        const measure = () => {
-          const energy = this.calculateHighFrequencyEnergy(this.analyser);
-          samples.push(energy);
-        };
+        const measure = () => samples.push(this.calculateHighFrequencyEnergy(this.analyser));
         const interval = setInterval(measure, 100);
         setTimeout(() => {
           clearInterval(interval);
-          const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
-          this.baselineEnergy = avg;
-          console.log("Baseline sat til:", avg.toFixed(1));
-          resolve(avg);
+          this.baselineEnergy = samples.reduce((a, b) => a + b, 0) / samples.length;
+          resolve();
         }, 2000);
       });
     },
 
     calculateHighFrequencyEnergy(analyserNode) {
-      const binCount = analyserNode.frequencyBinCount;
-      const dataArray = new Uint8Array(binCount);
+      const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
       analyserNode.getByteFrequencyData(dataArray);
-
-      const nyquist = (this.audioContext?.sampleRate || 44100) / 2;
-      const binSizeHz = nyquist / binCount;
-      const startBin = Math.max(0, Math.floor(this.minHighHz / binSizeHz));
-      const endBin = Math.min(binCount, Math.ceil(this.maxHighHz / binSizeHz));
-
+      const nyquist = this.audioContext.sampleRate / 2;
+      const binSizeHz = nyquist / analyserNode.frequencyBinCount;
+      const startBin = Math.floor(this.minHighHz / binSizeHz);
+      const endBin = Math.ceil(this.maxHighHz / binSizeHz);
       let sum = 0;
       for (let i = startBin; i < endBin; i++) sum += dataArray[i];
       return sum / (endBin - startBin);
@@ -191,7 +163,6 @@ export default {
     setBallPosition(x, y) {
       if (!this.$refs.ballElement) return;
       if (!this.ballSetterX) {
-        this.$refs.ballElement.style.transform = "none";
         this.ballSetterX = gsap.quickSetter(this.$refs.ballElement, "left", "%");
         this.ballSetterY = gsap.quickSetter(this.$refs.ballElement, "bottom", "px");
       }
@@ -210,11 +181,43 @@ export default {
       this.setBallPosition(this.ballX, this.ballY);
     },
 
+    detectBlow(now, energy) {
+      const relative = energy - this.baselineEnergy;
+
+      // Justér baseline lidt hele tiden
+      this.baselineEnergy =
+        this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
+
+      if (relative > this.relativeEnergyThreshold) {
+        if (!this.isBlowing) {
+          this.isBlowing = true;
+          this.blowStartTime = now;
+        }
+        this.blowDuration = now - this.blowStartTime;
+      } else {
+        this.isBlowing = false;
+        this.blowDuration = 0;
+      }
+
+      // Pust detekteres kun, hvis energien varer ved
+      if (
+        this.isBlowing &&
+        this.blowDuration > this.minBlowDuration &&
+        now - this.lastPuffTime > this.puffCooldown
+      ) {
+        this.lastPuffTime = now;
+        this.puffDetected = true;
+        return true;
+      }
+
+      this.puffDetected = false;
+      return false;
+    },
+
     gameLoop() {
       const glassWidth = 100;
       const glassHeight = 200;
       const minY = 10;
-      const glassTop = glassHeight;
       const maxHeight = 250;
       const minX = (this.ballRadius / glassWidth) * 100;
       const maxX = 100 - minX;
@@ -223,43 +226,14 @@ export default {
       const update = () => {
         const now = performance.now();
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
-        const smoothed = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
-        const deltaE = smoothed - this.prevEnergy;
-        this.prevEnergy = smoothed;
-        this.highFrequencyEnergy = smoothed;
+        this.highFrequencyEnergy = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
 
-        // Dynamisk baseline
-        if (this.baselineReady) {
-          const relativeEnergy = smoothed - this.baselineEnergy;
-          if (deltaE < 2 && relativeEnergy < this.relativeEnergyThreshold) {
-            const diff = smoothed - this.baselineEnergy;
-            this.baselineEnergy += diff * (1 - this.smoothingFactor);
-            this.baselineEnergy = Math.max(
-              this.baselineEnergy - this.noiseFloorClamp,
-              Math.min(this.baselineEnergy + this.noiseFloorClamp, smoothed)
-            );
-          }
-
-          const isOutsideGlass = this.ballX < minX || this.ballX > maxX;
-
-          // 💨 Detektion af pust
-          if (
-            relativeEnergy > this.relativeEnergyThreshold &&
-            deltaE > this.deltaThreshold &&
-            now - this.lastPuffTime > this.puffCooldown &&
-            this.ballY < maxHeight &&
-            !isOutsideGlass &&
-            !this.ballEjected
-          ) {
-            const forceStrength =
-              (relativeEnergy - this.relativeEnergyThreshold) / 25;
-            this.velocityY += forceStrength * 1.2;
-            this.velocityX += (Math.random() - 0.5) * 0.3;
-            this.lastPuffTime = now;
-            this.isBlowing = true;
-          } else {
-            this.isBlowing = false;
-          }
+        // Se om der er pust
+        const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
+        if (blowDetected && this.ballY < maxHeight) {
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 40;
+          this.velocityY += force;
+          this.velocityX += (Math.random() - 0.5) * 0.2;
         }
 
         // Fysik
@@ -269,24 +243,14 @@ export default {
         this.ballX += this.velocityX;
         this.ballY += this.velocityY;
 
+        if (this.ballY <= minY) {
+          this.ballY = minY;
+          this.velocityY = Math.abs(this.velocityY) * this.bounceDamping;
+        }
+
         if (this.ballY > maxHeight) {
           this.ballY = maxHeight;
-          if (this.velocityY > 0) this.velocityY = 0;
-        }
-
-        if (!this.ballEjected && this.ballY >= glassTop && this.ballY < glassTop + 10) {
-          this.ballEjected = true;
-          const pushDir = this.ballX < 50 ? -1 : 1;
-          this.velocityX = pushDir * (8 + Math.random() * 2);
-          this.ballY = glassTop + 5;
-        }
-
-        if (!this.ballEjected && this.ballY <= minY) {
-          this.ballY = minY;
-          if (this.velocityY < 0) {
-            this.velocityY = -this.velocityY * this.bounceDamping;
-            if (Math.abs(this.velocityY) < 1.0) this.velocityY = 0;
-          }
+          this.velocityY = 0;
         }
 
         if (this.ballY < viewportBottom) this.spawnNewBall();
