@@ -50,19 +50,19 @@ export default {
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.1,
+      gravity: 0.08,
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
-      airResistance: 0.97,
+      airResistance: 0.98,
       ballRadius: 15,
       ballEjected: false,
 
       // Følsomhedsparametre
       minHighHz: 1000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 10,
-      deltaThreshold: 5,
-      puffCooldown: 300,
+      relativeEnergyThreshold: 5,
+      deltaThreshold: 2,
+      puffCooldown: 150,
 
       // GSAP animation
       animationId: null,
@@ -227,8 +227,8 @@ export default {
           !isOutsideGlass &&
           !this.ballEjected
         ) {
-          const forceStrength = (relativeEnergy - this.relativeEnergyThreshold) / 40;
-          this.velocityY += forceStrength * 0.8;
+          const forceStrength = (relativeEnergy - this.relativeEnergyThreshold) / 30;
+          this.velocityY += forceStrength * 1.2;
           this.velocityX += (Math.random() - 0.5) * 0.4;
           this.lastPuffTime = now;
         }
