@@ -61,7 +61,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 400, // min. 400 ms før pust registreres
+      minBlowDuration: 350, // min. 350 ms før pust registreres
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -70,7 +70,7 @@ export default {
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.09,
+      gravity: 0.08,
       bounceDamping: 0.75,
       airResistance: 0.97,
       ballRadius: 15,
@@ -79,7 +79,7 @@ export default {
       // Parametre
       minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 9,
+      relativeEnergyThreshold: 8,
       smoothingFactor: 0.995,
 
       // Animation
@@ -240,7 +240,7 @@ export default {
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
 
         if (blowDetected && this.ballY < maxHeight) {
-          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 35;
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 30;
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.2;
         }
