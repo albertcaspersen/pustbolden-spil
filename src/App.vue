@@ -61,7 +61,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 250, // tidligere 350
+      minBlowDuration: 250,
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -79,7 +79,7 @@ export default {
       // Parametre
       minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 5, // tidligere 8
+      relativeEnergyThreshold: 5,
       smoothingFactor: 0.995,
 
       // Animation
@@ -234,8 +234,6 @@ export default {
       const glassHeight = 200;
       const minY = 10;
       const maxHeight = 250;
-      const minX = (this.ballRadius / glassWidth) * 100;
-      const maxX = 100 - minX;
       const viewportBottom = -150;
 
       const update = () => {
@@ -245,17 +243,16 @@ export default {
         // Gør energien lidt mere stabil
         this.highFrequencyEnergy = 0.85 * this.highFrequencyEnergy + 0.15 * newEnergy;
 
-        const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
-
-        if (blowDetected && this.ballY < maxHeight) {
-          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 20;
+        // Anvend force kontinuerligt mens man puster
+        if (this.isBlowing && this.ballY < maxHeight) {
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 30; // glidende svæv
           this.velocityY += force;
-          this.velocityX += (Math.random() - 0.5) * 0.2;
+          this.velocityX += (Math.random() - 0.5) * 0.05; // mindre sidebevægelse
         }
 
         // Fysik
         this.velocityX *= this.airResistance;
-        this.velocityY *= this.airResistance;
+        this.velocityY *= 0.99; // lidt mindre damping for mere svæv
         this.velocityY -= this.gravity;
         this.ballX += this.velocityX;
         this.ballY += this.velocityY;
