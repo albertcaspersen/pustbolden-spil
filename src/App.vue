@@ -61,7 +61,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 250,
+      minBlowDuration: 250, // tidligere 350
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -79,7 +79,7 @@ export default {
       // Parametre
       minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 5,
+      relativeEnergyThreshold: 5, // tidligere 8
       smoothingFactor: 0.995,
 
       // Animation
@@ -193,7 +193,8 @@ export default {
           this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
       }
 
-      this.relativeEnergy = energy - this.baselineEnergy;
+      // Beregn relativ energi og afrund til én decimal
+      this.relativeEnergy = parseFloat((energy - this.baselineEnergy).toFixed(1));
 
       // Hysterese
       const upperThreshold = this.relativeEnergyThreshold;
@@ -204,7 +205,8 @@ export default {
           this.isBlowing = false;
           this.blowDuration = 0;
         } else {
-          this.blowDuration = now - this.blowStartTime;
+          // Afrund varighed til én decimal
+          this.blowDuration = parseFloat((now - this.blowStartTime).toFixed(1));
         }
       } else {
         if (this.relativeEnergy > upperThreshold) {
@@ -234,25 +236,28 @@ export default {
       const glassHeight = 200;
       const minY = 10;
       const maxHeight = 250;
+      const minX = (this.ballRadius / glassWidth) * 100;
+      const maxX = 100 - minX;
       const viewportBottom = -150;
 
       const update = () => {
         const now = performance.now();
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
 
-        // Gør energien lidt mere stabil
-        this.highFrequencyEnergy = 0.85 * this.highFrequencyEnergy + 0.15 * newEnergy;
+        // Gør energien lidt mere stabil og afrund til én decimal
+        this.highFrequencyEnergy = parseFloat((0.85 * this.highFrequencyEnergy + 0.15 * newEnergy).toFixed(1));
 
-        // Anvend force kontinuerligt mens man puster
-        if (this.isBlowing && this.ballY < maxHeight) {
-          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 30; // glidende svæv
+        const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
+
+        if (blowDetected && this.ballY < maxHeight) {
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 20;
           this.velocityY += force;
-          this.velocityX += (Math.random() - 0.5) * 0.05; // mindre sidebevægelse
+          this.velocityX += (Math.random() - 0.5) * 0.2;
         }
 
         // Fysik
         this.velocityX *= this.airResistance;
-        this.velocityY *= 0.99; // lidt mindre damping for mere svæv
+        this.velocityY *= this.airResistance;
         this.velocityY -= this.gravity;
         this.ballX += this.velocityX;
         this.ballY += this.velocityY;
