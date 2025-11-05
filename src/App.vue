@@ -61,7 +61,8 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 250, // tidligere 350
+      minBlowDuration: 250,
+      maxBlowDuration: 1000,
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -79,7 +80,8 @@ export default {
       // Parametre
       minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 5, // tidligere 8
+      relativeEnergyThreshold: 6,
+      lowerEnergyThreshold: 2.5,
       smoothingFactor: 0.995,
 
       // Animation
@@ -160,9 +162,13 @@ export default {
       const binSizeHz = nyquist / analyserNode.frequencyBinCount;
       const startBin = Math.floor(this.minHighHz / binSizeHz);
       const endBin = Math.ceil(this.maxHighHz / binSizeHz);
-      let sum = 0;
-      for (let i = startBin; i < endBin; i++) sum += dataArray[i];
-      return sum / (endBin - startBin);
+
+      // Brug max frem for at fange korte pust
+      let maxVal = 0;
+      for (let i = startBin; i < endBin; i++) {
+        if (dataArray[i] > maxVal) maxVal = dataArray[i];
+      }
+      return maxVal;
     },
 
     setBallPosition(x, y) {
@@ -193,20 +199,19 @@ export default {
           this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
       }
 
-      // Beregn relativ energi og afrund til én decimal
-      this.relativeEnergy = parseFloat((energy - this.baselineEnergy).toFixed(1));
+      // Beregn relativ energi
+      this.relativeEnergy = Math.max(0, energy - this.baselineEnergy);
 
-      // Hysterese
+      // Hysterese thresholds
       const upperThreshold = this.relativeEnergyThreshold;
-      const lowerThreshold = this.relativeEnergyThreshold * 0.6;
+      const lowerThreshold = this.lowerEnergyThreshold;
 
       if (this.isBlowing) {
-        if (this.relativeEnergy < lowerThreshold) {
+        if (this.relativeEnergy < lowerThreshold || this.blowDuration > this.maxBlowDuration) {
           this.isBlowing = false;
           this.blowDuration = 0;
         } else {
-          // Afrund varighed til én decimal
-          this.blowDuration = parseFloat((now - this.blowStartTime).toFixed(1));
+          this.blowDuration = now - this.blowStartTime;
         }
       } else {
         if (this.relativeEnergy > upperThreshold) {
@@ -244,13 +249,13 @@ export default {
         const now = performance.now();
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
 
-        // Gør energien lidt mere stabil og afrund til én decimal
+        // Glat energien
         this.highFrequencyEnergy = parseFloat((0.85 * this.highFrequencyEnergy + 0.15 * newEnergy).toFixed(1));
 
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
 
         if (blowDetected && this.ballY < maxHeight) {
-          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 20;
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 40;
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.2;
         }
