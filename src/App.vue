@@ -61,7 +61,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 350, // min. 350 ms før pust registreres
+      minBlowDuration: 250, // tidligere 350
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -79,7 +79,7 @@ export default {
       // Parametre
       minHighHz: 2000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 8,
+      relativeEnergyThreshold: 5, // tidligere 8
       smoothingFactor: 0.995,
 
       // Animation
@@ -187,28 +187,34 @@ export default {
     },
 
     detectBlow(now, energy) {
-      // Opdater baseline dynamisk
-      this.baselineEnergy =
-        this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
-
-      // Beregn relativ energi (kan gå i minus)
-      this.relativeEnergy = energy - this.baselineEnergy;
-
-      // Bestem om energien er over tærsklen
-      const aboveThreshold = this.relativeEnergy > this.relativeEnergyThreshold;
-
-      if (aboveThreshold) {
-        if (!this.isBlowing) {
-          this.isBlowing = true;
-          this.blowStartTime = now;
-        }
-        this.blowDuration = now - this.blowStartTime;
-      } else {
-        this.isBlowing = false;
-        this.blowDuration = 0;
+      // Opdater baseline kun når der ikke pustes
+      if (!this.isBlowing) {
+        this.baselineEnergy =
+          this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
       }
 
-      // Kræv min. 500 ms før pust registreres
+      this.relativeEnergy = energy - this.baselineEnergy;
+
+      // Hysterese
+      const upperThreshold = this.relativeEnergyThreshold;
+      const lowerThreshold = this.relativeEnergyThreshold * 0.6;
+
+      if (this.isBlowing) {
+        if (this.relativeEnergy < lowerThreshold) {
+          this.isBlowing = false;
+          this.blowDuration = 0;
+        } else {
+          this.blowDuration = now - this.blowStartTime;
+        }
+      } else {
+        if (this.relativeEnergy > upperThreshold) {
+          this.isBlowing = true;
+          this.blowStartTime = now;
+          this.blowDuration = 0;
+        }
+      }
+
+      // Kræv min. varighed før pust registreres
       if (
         this.isBlowing &&
         this.blowDuration > this.minBlowDuration &&
@@ -235,7 +241,9 @@ export default {
       const update = () => {
         const now = performance.now();
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
-        this.highFrequencyEnergy = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
+
+        // Gør energien lidt mere stabil
+        this.highFrequencyEnergy = 0.85 * this.highFrequencyEnergy + 0.15 * newEnergy;
 
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
 
