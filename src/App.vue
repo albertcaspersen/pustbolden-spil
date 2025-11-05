@@ -56,7 +56,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 500, // kræv min. 100 ms høj energi
+      minBlowDuration: 500, // <-- kræv minimum 500 ms over threshold
       puffCooldown: 500,
       lastPuffTime: 0,
 
@@ -184,7 +184,7 @@ export default {
     detectBlow(now, energy) {
       const relative = energy - this.baselineEnergy;
 
-      // Justér baseline lidt hele tiden
+      // Dynamisk baseline justering
       this.baselineEnergy =
         this.smoothingFactor * this.baselineEnergy + (1 - this.smoothingFactor) * energy;
 
@@ -199,7 +199,7 @@ export default {
         this.blowDuration = 0;
       }
 
-      // Pust detekteres kun, hvis energien varer ved
+      // Kun pust hvis energien har varet mindst 500 ms
       if (
         this.isBlowing &&
         this.blowDuration > this.minBlowDuration &&
@@ -228,7 +228,7 @@ export default {
         const newEnergy = this.calculateHighFrequencyEnergy(this.analyser);
         this.highFrequencyEnergy = 0.7 * this.highFrequencyEnergy + 0.3 * newEnergy;
 
-        // Se om der er pust
+        // Pustdetektion
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
         if (blowDetected && this.ballY < maxHeight) {
           const force = (this.highFrequencyEnergy - this.baselineEnergy) / 40;
@@ -273,13 +273,11 @@ export default {
   font-family: sans-serif;
   text-align: center;
 }
-
 .game-container {
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-
 .glass {
   width: 100px;
   height: 200px;
@@ -287,63 +285,29 @@ export default {
   border-top: none;
   position: relative;
   border-radius: 0 0 10px 10px;
-  overflow: visible;
 }
-
-.playable-zone {
-  position: absolute;
-  left: -50px; right: -50px; top: -50px; bottom: 10px;
-  background-color: rgba(33, 150, 243, 0.1);
-  border: 2px dashed rgba(33, 150, 243, 0.4);
-  pointer-events: none;
-}
-
-.safe-zone {
-  position: absolute;
-  left: 0; right: 0; top: 30px; bottom: 10px;
-  background-color: rgba(76, 175, 80, 0.1);
-  border-top: 2px dashed rgba(76, 175, 80, 0.4);
-  border-bottom: 2px dashed rgba(76, 175, 80, 0.4);
-  pointer-events: none;
-}
-
 .ball {
   width: 30px;
   height: 30px;
-  background-color: red;
+  background: red;
   border-radius: 50%;
   position: absolute;
-  left: 35%;
   bottom: 10px;
 }
-
-button {
-  margin-top: 20px;
-  padding: 10px 20px;
-  font-size: 16px;
-  cursor: pointer;
-}
-
-/* Debugpanel styling */
 .debug-panel {
-  margin-top: 15px;
-  padding: 10px;
+  margin-top: 10px;
+  padding: 8px;
+  font-family: monospace;
   border: 1px solid #ccc;
   background: #f9f9f9;
-  border-radius: 8px;
-  width: 260px;
+  border-radius: 6px;
   text-align: left;
-  font-family: monospace;
-  font-size: 14px;
 }
-
 .error-message {
-  margin-top: 20px;
-  padding: 10px;
   color: #D8000C;
-  background-color: #FFD2D2;
-  border: 1px solid #D8000C;
+  background: #FFD2D2;
+  padding: 10px;
   border-radius: 5px;
-  max-width: 300px;
+  margin-top: 10px;
 }
 </style>
