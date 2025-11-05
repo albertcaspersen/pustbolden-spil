@@ -6,8 +6,12 @@
         <div class="safe-zone"></div>
         <div class="ball" ref="ballElement"></div>
       </div>
-      
-      <button @click="startGame" v-if="!gameStarted">Start Spil</button>
+
+      <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
+
+      <div v-if="calibrating">
+        <p>🔊 Kalibrerer... vær stille i 2 sekunder</p>
+      </div>
 
       <div v-if="gameStarted">
         <p>Blæs i mikrofonen for at holde bolden i luften!</p>
@@ -27,17 +31,21 @@ import { gsap } from "gsap";
 export default {
   data() {
     return {
+      // Spiltilstand
       gameStarted: false,
+      calibrating: false,
+      errorMsg: null,
+
+      // Lyd
       audioContext: null,
       analyser: null,
       highFrequencyEnergy: 0,
-      baselineEnergy: 20, // fast baseline (du kan genaktivere automatisk senere)
-      baselineReady: true,
+      baselineEnergy: 0,
+      baselineReady: false,
       prevEnergy: 0,
       lastPuffTime: 0,
-      errorMsg: null,
 
-      // Fysik
+      // Boldens fysik
       ballX: 50,
       ballY: 10,
       velocityX: 0,
@@ -46,19 +54,20 @@ export default {
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
       airResistance: 0.97,
+      ballRadius: 15,
+      ballEjected: false,
 
-      // Justerede lydparametre
+      // Følsomhedsparametre
       minHighHz: 1000,
       maxHighHz: 8000,
       relativeEnergyThreshold: 10,
       deltaThreshold: 5,
-      puffCooldown: 300, // ms mellem pust
+      puffCooldown: 300,
 
+      // GSAP animation
       animationId: null,
       ballSetterX: null,
       ballSetterY: null,
-      ballRadius: 15,
-      ballEjected: false,
     };
   },
 
@@ -86,9 +95,9 @@ export default {
         }
 
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-        // 🎧 Bandpass-filter
         const source = this.audioContext.createMediaStreamSource(stream);
+
+        // 🎧 Bandpass filter til pust
         const bandpass = this.audioContext.createBiquadFilter();
         bandpass.type = "bandpass";
         bandpass.frequency.value = 3000;
@@ -101,14 +110,17 @@ export default {
         source.connect(bandpass);
         bandpass.connect(this.analyser);
 
-        // 🔥 Vi springer kalibrering over under test
-        this.baselineEnergy = 20;
+        // 🎚️ Kalibrer baggrundsstøj
+        this.calibrating = true;
+        await this.measureBaseline();
+        this.calibrating = false;
         this.baselineReady = true;
 
+        // 🚀 Start spillet
         this.gameStarted = true;
         this.gameLoop();
       } catch (error) {
-        console.error("Fejl ved start af spil:", error);
+        console.error("Fejl ved start:", error);
         if (
           error.name === "NotAllowedError" ||
           error.name === "PermissionDeniedError"
@@ -120,12 +132,31 @@ export default {
           window.location.protocol !== "https:" &&
           window.location.hostname !== "localhost"
         ) {
-          this.errorMsg = "Mikrofonadgang kræver en sikker forbindelse (HTTPS).";
+          this.errorMsg = "Mikrofonadgang kræver en sikker (HTTPS) forbindelse.";
         } else {
           this.errorMsg =
-            "Kunne ikke starte spillet. Tjek dine browserindstillinger og tilladelser.";
+            "Kunne ikke starte spillet. Tjek browserens tilladelser.";
         }
       }
+    },
+
+    // 🔎 Måler baseline over 2 sekunder
+    async measureBaseline() {
+      return new Promise((resolve) => {
+        const samples = [];
+        const measure = () => {
+          const energy = this.calculateHighFrequencyEnergy(this.analyser);
+          samples.push(energy);
+        };
+        const interval = setInterval(measure, 100);
+        setTimeout(() => {
+          clearInterval(interval);
+          const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+          this.baselineEnergy = avg;
+          console.log("Baseline sat til:", avg.toFixed(1));
+          resolve(avg);
+        }, 2000);
+      });
     },
 
     calculateHighFrequencyEnergy(analyserNode) {
@@ -165,12 +196,13 @@ export default {
       this.setBallPosition(this.ballX, this.ballY);
     },
 
+    // 🌀 Hovedloopet
     gameLoop() {
       const glassWidth = 100;
-      const glassHeight = 200;
+      const glassHeight = 300;
       const minY = 10;
       const glassTop = glassHeight;
-      const maxHeight = 250;
+      const maxHeight = 350;
       const minX = (this.ballRadius / glassWidth) * 100;
       const maxX = 100 - minX;
       const viewportBottom = -150;
@@ -186,7 +218,7 @@ export default {
         const relativeEnergy = smoothed - this.baselineEnergy;
         const isOutsideGlass = this.ballX < minX || this.ballX > maxX;
 
-        // 💨 Detekter pust
+        // 💨 Pustdetektion
         if (
           relativeEnergy > this.relativeEnergyThreshold &&
           deltaE > this.deltaThreshold &&
@@ -201,6 +233,7 @@ export default {
           this.lastPuffTime = now;
         }
 
+        // 🧠 Fysik
         this.velocityX *= this.airResistance;
         this.velocityY *= this.airResistance;
         this.velocityY -= this.gravity;
@@ -276,7 +309,7 @@ export default {
 
 .glass {
   width: 100px;
-  height: 200px;
+  height: 300px;
   border: 5px solid #ccc;
   border-top: none;
   position: relative;
@@ -319,4 +352,3 @@ button {
   cursor: pointer;
 }
 </style>
-
