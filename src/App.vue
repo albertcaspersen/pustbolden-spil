@@ -255,7 +255,7 @@ export default {
         const blowDetected = this.detectBlow(now, this.highFrequencyEnergy);
 
         if (blowDetected && this.ballY < maxHeight) {
-          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 20;
+          const force = (this.highFrequencyEnergy - this.baselineEnergy) / 5;
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.2;
         }
