@@ -56,7 +56,7 @@ export default {
       puffDetected: false,
       blowStartTime: 0,
       blowDuration: 0,
-      minBlowDuration: 100, // kræv min. 100 ms høj energi
+      minBlowDuration: 500, // kræv min. 100 ms høj energi
       puffCooldown: 500,
       lastPuffTime: 0,
 
