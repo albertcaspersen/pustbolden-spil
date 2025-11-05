@@ -7,17 +7,31 @@
         <div class="ball" ref="ballElement"></div>
       </div>
 
+      <!-- Start-knap -->
       <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
 
+      <!-- Kalibreringsbesked -->
       <div v-if="calibrating">
-        <p>🔊 Kalibrerer... vær stille i 2 sekunder</p>
+        <p>🤫 Kalibrerer... vær stille i 2 sekunder</p>
       </div>
 
+      <!-- Spil og debugpanel -->
       <div v-if="gameStarted">
-        <p>Blæs i mikrofonen for at holde bolden i luften!</p>
-        <p>Lydenergi: {{ highFrequencyEnergy.toFixed(1) }}</p>
+        <p>🎯 Blæs i mikrofonen for at holde bolden i luften!</p>
+
+        <!-- Debug info -->
+        <div class="debug-panel">
+          <p><strong>Debug Info</strong></p>
+          <p>Lydenergi: {{ highFrequencyEnergy.toFixed(1) }}</p>
+          <p>Baseline: {{ baselineEnergy.toFixed(1) }}</p>
+          <p>Relative Energi: {{ (highFrequencyEnergy - baselineEnergy).toFixed(1) }}</p>
+          <p>DeltaE: {{ (highFrequencyEnergy - prevEnergy).toFixed(1) }}</p>
+          <p>Threshold (Rel/Δ): {{ relativeEnergyThreshold }} / {{ deltaThreshold }}</p>
+          <p>Pust-Status: <strong>{{ isBlowing ? "💨 Registreret" : "..." }}</strong></p>
+        </div>
       </div>
 
+      <!-- Fejlbesked -->
       <div v-if="errorMsg" class="error-message">
         <p><strong>Fejl:</strong> {{ errorMsg }}</p>
       </div>
@@ -44,27 +58,30 @@ export default {
       baselineReady: false,
       prevEnergy: 0,
       lastPuffTime: 0,
+      isBlowing: false,
 
-      // Boldens fysik
+      // Boldfysik
       ballX: 50,
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.08,
+      gravity: 0.06,
       bounceDamping: 0.75,
       wallBounceDamping: 0.75,
-      airResistance: 0.98,
+      airResistance: 0.985,
       ballRadius: 15,
       ballEjected: false,
 
-      // Følsomhedsparametre
+      // Parametre
       minHighHz: 1000,
       maxHighHz: 8000,
-      relativeEnergyThreshold: 5,
-      deltaThreshold: 2,
+      relativeEnergyThreshold: 6,
+      deltaThreshold: 3,
       puffCooldown: 150,
+      smoothingFactor: 0.995, // baseline justering
+      noiseFloorClamp: 0.05,
 
-      // GSAP animation
+      // Animation
       animationId: null,
       ballSetterX: null,
       ballSetterY: null,
@@ -97,7 +114,6 @@ export default {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const source = this.audioContext.createMediaStreamSource(stream);
 
-        // 🎧 Bandpass filter til pust
         const bandpass = this.audioContext.createBiquadFilter();
         bandpass.type = "bandpass";
         bandpass.frequency.value = 3000;
@@ -110,13 +126,12 @@ export default {
         source.connect(bandpass);
         bandpass.connect(this.analyser);
 
-        // 🎚️ Kalibrer baggrundsstøj
+        // Kalibrer først
         this.calibrating = true;
         await this.measureBaseline();
         this.calibrating = false;
         this.baselineReady = true;
 
-        // 🚀 Start spillet
         this.gameStarted = true;
         this.gameLoop();
       } catch (error) {
@@ -140,7 +155,6 @@ export default {
       }
     },
 
-    // 🔎 Måler baseline over 2 sekunder
     async measureBaseline() {
       return new Promise((resolve) => {
         const samples = [];
@@ -196,13 +210,12 @@ export default {
       this.setBallPosition(this.ballX, this.ballY);
     },
 
-    // 🌀 Hovedloopet
     gameLoop() {
       const glassWidth = 100;
-      const glassHeight = 300;
+      const glassHeight = 200;
       const minY = 10;
       const glassTop = glassHeight;
-      const maxHeight = 350;
+      const maxHeight = 250;
       const minX = (this.ballRadius / glassWidth) * 100;
       const maxX = 100 - minX;
       const viewportBottom = -150;
@@ -215,25 +228,41 @@ export default {
         this.prevEnergy = smoothed;
         this.highFrequencyEnergy = smoothed;
 
-        const relativeEnergy = smoothed - this.baselineEnergy;
-        const isOutsideGlass = this.ballX < minX || this.ballX > maxX;
+        // Dynamisk baseline
+        if (this.baselineReady) {
+          const relativeEnergy = smoothed - this.baselineEnergy;
+          if (deltaE < 2 && relativeEnergy < this.relativeEnergyThreshold) {
+            const diff = smoothed - this.baselineEnergy;
+            this.baselineEnergy += diff * (1 - this.smoothingFactor);
+            this.baselineEnergy = Math.max(
+              this.baselineEnergy - this.noiseFloorClamp,
+              Math.min(this.baselineEnergy + this.noiseFloorClamp, smoothed)
+            );
+          }
 
-        // 💨 Pustdetektion
-        if (
-          relativeEnergy > this.relativeEnergyThreshold &&
-          deltaE > this.deltaThreshold &&
-          now - this.lastPuffTime > this.puffCooldown &&
-          this.ballY < maxHeight &&
-          !isOutsideGlass &&
-          !this.ballEjected
-        ) {
-          const forceStrength = (relativeEnergy - this.relativeEnergyThreshold) / 30;
-          this.velocityY += forceStrength * 1.2;
-          this.velocityX += (Math.random() - 0.5) * 0.4;
-          this.lastPuffTime = now;
+          const isOutsideGlass = this.ballX < minX || this.ballX > maxX;
+
+          // 💨 Detektion af pust
+          if (
+            relativeEnergy > this.relativeEnergyThreshold &&
+            deltaE > this.deltaThreshold &&
+            now - this.lastPuffTime > this.puffCooldown &&
+            this.ballY < maxHeight &&
+            !isOutsideGlass &&
+            !this.ballEjected
+          ) {
+            const forceStrength =
+              (relativeEnergy - this.relativeEnergyThreshold) / 25;
+            this.velocityY += forceStrength * 1.2;
+            this.velocityX += (Math.random() - 0.5) * 0.3;
+            this.lastPuffTime = now;
+            this.isBlowing = true;
+          } else {
+            this.isBlowing = false;
+          }
         }
 
-        // 🧠 Fysik
+        // Fysik
         this.velocityX *= this.airResistance;
         this.velocityY *= this.airResistance;
         this.velocityY -= this.gravity;
@@ -250,16 +279,6 @@ export default {
           const pushDir = this.ballX < 50 ? -1 : 1;
           this.velocityX = pushDir * (8 + Math.random() * 2);
           this.ballY = glassTop + 5;
-        }
-
-        if (!isOutsideGlass && !this.ballEjected && this.ballY >= minY) {
-          if (this.ballX <= minX) {
-            this.ballX = minX;
-            this.velocityX = -this.velocityX * this.wallBounceDamping;
-          } else if (this.ballX >= maxX) {
-            this.ballX = maxX;
-            this.velocityX = -this.velocityX * this.wallBounceDamping;
-          }
         }
 
         if (!this.ballEjected && this.ballY <= minY) {
@@ -282,16 +301,6 @@ export default {
 </script>
 
 <style>
-.error-message {
-  margin-top: 20px;
-  padding: 10px;
-  color: #D8000C;
-  background-color: #FFD2D2;
-  border: 1px solid #D8000C;
-  border-radius: 5px;
-  max-width: 300px;
-}
-
 #app {
   display: flex;
   justify-content: center;
@@ -309,7 +318,7 @@ export default {
 
 .glass {
   width: 100px;
-  height: 300px;
+  height: 200px;
   border: 5px solid #ccc;
   border-top: none;
   position: relative;
@@ -320,7 +329,7 @@ export default {
 .playable-zone {
   position: absolute;
   left: -50px; right: -50px; top: -50px; bottom: 10px;
-  background-color: rgba(33, 150, 243, 0.15);
+  background-color: rgba(33, 150, 243, 0.1);
   border: 2px dashed rgba(33, 150, 243, 0.4);
   pointer-events: none;
 }
@@ -328,9 +337,9 @@ export default {
 .safe-zone {
   position: absolute;
   left: 0; right: 0; top: 30px; bottom: 10px;
-  background-color: rgba(76, 175, 80, 0.2);
-  border-top: 2px dashed rgba(76, 175, 80, 0.5);
-  border-bottom: 2px dashed rgba(76, 175, 80, 0.5);
+  background-color: rgba(76, 175, 80, 0.1);
+  border-top: 2px dashed rgba(76, 175, 80, 0.4);
+  border-bottom: 2px dashed rgba(76, 175, 80, 0.4);
   pointer-events: none;
 }
 
@@ -342,7 +351,6 @@ export default {
   position: absolute;
   left: 35%;
   bottom: 10px;
-  will-change: left, bottom;
 }
 
 button {
@@ -350,5 +358,28 @@ button {
   padding: 10px 20px;
   font-size: 16px;
   cursor: pointer;
+}
+
+/* Debugpanel styling */
+.debug-panel {
+  margin-top: 15px;
+  padding: 10px;
+  border: 1px solid #ccc;
+  background: #f9f9f9;
+  border-radius: 8px;
+  width: 260px;
+  text-align: left;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.error-message {
+  margin-top: 20px;
+  padding: 10px;
+  color: #D8000C;
+  background-color: #FFD2D2;
+  border: 1px solid #D8000C;
+  border-radius: 5px;
+  max-width: 300px;
 }
 </style>
