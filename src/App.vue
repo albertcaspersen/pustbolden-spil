@@ -75,7 +75,7 @@ export default {
       smoothingFactor: 0.995,
 
       // ✅ Noise gate – filtrér alt under denne energi (juster 10–30)
-      noiseGateThreshold: 30,
+      noiseGateThreshold: 20,
 
       // Animation
       animationId: null,
