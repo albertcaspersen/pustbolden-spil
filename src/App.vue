@@ -38,7 +38,6 @@ export default {
       // Lyd
       audioContext: null,
       analyser: null,
-      // NYE: Opdeler energien for bedre analyse
       lowFrequencyEnergy: 0,
       highFrequencyEnergy: 0,
       combinedEnergy: 0,
@@ -49,7 +48,7 @@ export default {
       // Pust-detektion
       isBlowing: false,
       lastPuffTime: 0,
-      puffCooldown: 400, // Lidt kortere cooldown
+      puffCooldown: 400,
 
       // Fysik
       ballX: 50,
@@ -61,21 +60,18 @@ export default {
       airResistance: 0.92,
       ballRadius: 15,
 
-      // Parametre
+      // --- OPDATEREDE PARAMETRE ---
       // FORBEDRET: Definerer frekvensbånd til analyse
-      lowHzStart: 100,
-      lowHzEnd: 1500,
-      highHzStart: 3000,
-      highHzEnd: 10000,
+      lowHzStart: 300,   // Ignorerer den dybeste rumlen
+      lowHzEnd: 2000,
+      highHzStart: 2000, // Lavere start for at fange mere af "hvæset"
+      highHzEnd: 12000,  // Går lidt højere op
 
-      // FORBEDRET: Tærskler for pust-detektion
-      // Hvor meget energi over baseline kræves der?
-      puffThreshold: 8,
-      // Hvor stor skal den pludselige stigning være?
-      onsetThreshold: 10,
-      // Forholdet mellem høj- og lavfrekvent støj (et pust er ofte balanceret)
-      balanceThreshold: 0.7,
-
+      // FORBEDRET: Tærskler for pust-detektion, gjort mere følsomme
+      puffThreshold: 5,      // Hvor meget energi over baseline kræves der?
+      onsetThreshold: 8,     // Hvor stor skal den pludselige stigning være?
+      balanceThreshold: 0.6, // Forholdet mellem høj- og lavfrekvent støj (et pust er ofte balanceret)
+      
       // Animation
       animationId: null,
       ballSetterX: null,
@@ -106,25 +102,20 @@ export default {
 
         const stream = await navigator.mediaDevices.getUserMedia({
           audio: {
-            // FORBEDRET: Moderne browsere understøtter disse til at fjerne ekko og konstant støj
             noiseSuppression: true,
             echoCancellation: true,
           },
         });
         const source = this.audioContext.createMediaStreamSource(stream);
 
-        // JUSTERET: Gør filteret lidt bredere for at fange mere af pust-lyden
-        const bandpass = this.audioContext.createBiquadFilter();
-        bandpass.type = "bandpass";
-        bandpass.frequency.value = 4000;
-        bandpass.Q.value = 1; // Lavere Q-værdi = bredere filter
-
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 2048;
         this.analyser.smoothingTimeConstant = 0.2;
 
-        source.connect(bandpass);
-        bandpass.connect(this.analyser);
+        // FJERNET: Bandpass-filteret er fjernet for at give en mere rå analyse
+        // source.connect(bandpass);
+        // bandpass.connect(this.analyser);
+        source.connect(this.analyser); // Direkte forbindelse
 
         this.calibrating = true;
         await this.measureBaseline();
@@ -166,7 +157,6 @@ export default {
       });
     },
 
-    // NY FUNKTION: Analyserer energien i flere frekvensbånd
     calculateEnergies() {
       const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
       this.analyser.getByteFrequencyData(dataArray);
@@ -186,7 +176,6 @@ export default {
       const low = getAvgEnergy(this.lowHzStart, this.lowHzEnd);
       const high = getAvgEnergy(this.highHzStart, this.highHzEnd);
       
-      // Vægter den samlede energi. RMS (den generelle lydstyrke) tæller mest.
       const timeDomainArray = new Uint8Array(this.analyser.fftSize);
       this.analyser.getByteTimeDomainData(timeDomainArray);
       let sumSquares = 0.0;
@@ -223,37 +212,36 @@ export default {
       this.setBallPosition(this.ballX, this.ballY);
     },
 
-    // HELT NY LOGIK: Mere robust detektion af pust
+    // --- OPDATERET LOGIK ---
     detectBlow(now, energies) {
-      // 1. Juster langsomt baseline til den generelle baggrundsstøj
       this.baseline = this.baseline * 0.998 + energies.combined * 0.002;
       
       const energyAboveBaseline = energies.combined - this.baseline;
       const energyDelta = energies.combined - this.prevEnergy;
       this.prevEnergy = energies.combined;
 
-      // Cooldown for at undgå flere pust lige efter hinanden
       if (now - this.lastPuffTime < this.puffCooldown) {
         return false;
       }
       
-      // 2. Tjek for en pludselig, kraftig stigning i energien (et "onset")
       const isSuddenOnset = energyDelta > this.onsetThreshold;
-      
-      // 3. Tjek om den samlede energi er markant over baggrundsstøjen
       const isEnergyHighEnough = energyAboveBaseline > this.puffThreshold;
 
-      // 4. Tjek om energien er "bredspektret" (både lav og høj frekvens)
-      // Dette hjælper med at ignorere tale, som ofte har mere specifikke frekvenser.
-      const highToLowRatio = energies.high / energies.low;
-      const isBalanced = highToLowRatio > this.balanceThreshold && energies.low > 20;
+      const highToLowRatio = energies.low > 0 ? energies.high / energies.low : 0;
+      const isBalanced = highToLowRatio > this.balanceThreshold;
+      
+      // NYT TJEK: Sikrer at der er energi i BEGGE bånd. Dette er nøglen til at adskille pust fra andre lyde.
+      const hasMinimumEnergy = energies.low > 25 && energies.high > 20;
 
-      if (isSuddenOnset && isEnergyHighEnough && isBalanced) {
+      if (isSuddenOnset && isEnergyHighEnough && isBalanced && hasMinimumEnergy) {
         this.lastPuffTime = now;
+        // Udvidet logning for lettere debugging
         console.log("💨 Pust detekteret!", {
             delta: energyDelta.toFixed(1),
             aboveBaseline: energyAboveBaseline.toFixed(1),
-            ratio: highToLowRatio.toFixed(1),
+            ratio: highToLowRatio.toFixed(2),
+            low: energies.low.toFixed(1),
+            high: energies.high.toFixed(1),
         });
         return true;
       }
@@ -277,10 +265,9 @@ export default {
         const blowDetected = this.detectBlow(now, energies);
 
         if (blowDetected && this.ballY < maxHeight) {
-          // Giver bolden et kraftigere og mere tilfredsstillende skub
           const force = Math.min((this.combinedEnergy - this.baseline) / 4, 15);
           this.velocityY += force;
-          this.velocityX += (Math.random() - 0.5) * 0.4; // Lidt mere sideværts bevægelse
+          this.velocityX += (Math.random() - 0.5) * 0.4;
         }
 
         this.velocityX *= this.airResistance;
