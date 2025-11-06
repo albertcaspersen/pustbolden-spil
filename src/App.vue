@@ -55,7 +55,7 @@ export default {
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.25,
+      gravity: 0.2, // ÆNDRET: Lavere tyngdekraft, bolden falder langsommere
       bounceDamping: 0.75,
       airResistance: 0.92,
       ballRadius: 15,
@@ -112,9 +112,6 @@ export default {
         this.analyser.fftSize = 2048;
         this.analyser.smoothingTimeConstant = 0.2;
 
-        // FJERNET: Bandpass-filteret er fjernet for at give en mere rå analyse
-        // source.connect(bandpass);
-        // bandpass.connect(this.analyser);
         source.connect(this.analyser); // Direkte forbindelse
 
         this.calibrating = true;
@@ -230,12 +227,10 @@ export default {
       const highToLowRatio = energies.low > 0 ? energies.high / energies.low : 0;
       const isBalanced = highToLowRatio > this.balanceThreshold;
       
-      // NYT TJEK: Sikrer at der er energi i BEGGE bånd. Dette er nøglen til at adskille pust fra andre lyde.
       const hasMinimumEnergy = energies.low > 25 && energies.high > 20;
 
       if (isSuddenOnset && isEnergyHighEnough && isBalanced && hasMinimumEnergy) {
         this.lastPuffTime = now;
-        // Udvidet logning for lettere debugging
         console.log("💨 Pust detekteret!", {
             delta: energyDelta.toFixed(1),
             aboveBaseline: energyAboveBaseline.toFixed(1),
@@ -265,7 +260,8 @@ export default {
         const blowDetected = this.detectBlow(now, energies);
 
         if (blowDetected && this.ballY < maxHeight) {
-          const force = Math.min((this.combinedEnergy - this.baseline) / 4, 15);
+          // ÆNDRET: Kraften fra pustet er øget ved at dividere med et lavere tal
+          const force = Math.min((this.combinedEnergy - this.baseline) / 3, 15);
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.4;
         }
@@ -336,8 +332,8 @@ export default {
   left: 0;
   width: 100px;
   height: 600px;
-  background-color: rgba(0, 255, 0, 0.2);
-  border: 2px solid rgba(0, 255, 0, 0.5);
+  /*background-color: rgba(0, 255, 0, 0.2);
+  border: 2px solid rgba(0, 255, 0, 0.5);*/
   border-radius: 5px;
   pointer-events: none;
   z-index: 0;
