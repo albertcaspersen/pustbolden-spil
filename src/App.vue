@@ -11,11 +11,11 @@
       <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
 
       <div v-if="calibrating">
-        <p>🤫 Kalibrerer... vær stille i 2 sekunder</p>
+       <!---<p>🤫 Kalibrerer... vær stille i 2 sekunder</p>-->
       </div>
 
       <div v-if="gameStarted">
-        <p>🎯 Blæs i mikrofonen for at holde bolden i luften!</p>
+        <!--<p>🎯 Blæs i mikrofonen for at holde bolden i luften!</p>-->
       </div>
 
       <div v-if="errorMsg" class="error-message">
@@ -265,7 +265,7 @@ export default {
         const blowDetected = this.detectBlow(now, combined);
 
         if (blowDetected && this.ballY < maxHeight) {
-          const force = (combined - this.baselineSlow) / 5;
+          const force = (combined - this.baselineSlow) / 3;
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.2;
         }
@@ -310,12 +310,13 @@ export default {
 .background {
   
 
-  position: fixed;
+  position: absolute;
   top: -2vh;
-  left: -92vw;
+  left: -129vw;
   width: 66rem;
   height: 55rem;
   z-index: -4;
+  overflow: hidden;
 
 
 }
