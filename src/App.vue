@@ -11,7 +11,7 @@
       <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
 
       <div v-if="calibrating">
-       <!---<p>🤫 Kalibrerer... vær stille i 2 sekunder</p>-->
+        <!--<p>🤫 Kalibrerer... vær stille i 2 sekunder</p>-->
       </div>
 
       <div v-if="gameStarted">
@@ -65,7 +65,7 @@ export default {
       velocityY: 0,
       gravity: 0.08,
       bounceDamping: 0.75,
-      airResistance: 0.97,
+      airResistance: 0.92,
       ballRadius: 15,
 
       // Parametre
@@ -73,6 +73,9 @@ export default {
       maxHighHz: 8000,
       energyThreshold: 5.5,
       smoothingFactor: 0.995,
+
+      // ✅ Noise gate – filtrér alt under denne energi (juster 10–30)
+      noiseGateThreshold: 70,
 
       // Animation
       animationId: null,
@@ -211,6 +214,14 @@ export default {
     },
 
     detectBlow(now, energy) {
+
+      // ✅ Noise Gate – ignorer alt under denne energi
+      if (energy < this.noiseGateThreshold) {
+        this.isBlowing = false;
+        this.puffDetected = false;
+        return false;
+      }
+
       this.baselineSlow = this.baselineSlow * 0.995 + energy * 0.005;
       this.baselineFast = this.baselineFast * 0.8 + energy * 0.2;
 
@@ -308,8 +319,6 @@ export default {
   position: relative;
 }
 .background {
-  
-
   position: absolute;
   top: -2vh;
   left: -129vw;
@@ -317,8 +326,6 @@ export default {
   height: 55rem;
   z-index: -4;
   overflow: hidden;
-
-
 }
 .game-container {
   display: flex;
@@ -330,7 +337,6 @@ export default {
 .glass {
   width: 100px;
   height: 200px;
-  
   border-top: none;
   position: relative;
   border-radius: 0 0 10px 10px;
@@ -355,12 +361,6 @@ export default {
   position: absolute;
   bottom: 10px;
   z-index: 1;
-}
-.positive {
-  color: green;
-}
-.negative {
-  color: #c00;
 }
 .error-message {
   color: #D8000C;
