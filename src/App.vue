@@ -56,7 +56,7 @@ export default {
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.08,
+      gravity: 0.25,
       bounceDamping: 0.75,
       airResistance: 0.92,
       ballRadius: 15,
