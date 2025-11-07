@@ -1,6 +1,5 @@
 <template>
   <div id="app">
-    <img src="/src/pic/ChatGPT Image 6. nov. 2025, 09.32.13.png" alt="#" class="background">
     <div class="game-container">
       <div class="glass">
         <div class="playable-zone"></div>
@@ -10,13 +9,8 @@
 
       <button @click="startGame" v-if="!gameStarted && !calibrating">Start Spil</button>
 
-      <div v-if="calibrating">
-        <!--<p>🤫 Kalibrerer... vær stille i 2 sekunder</p>-->
-      </div>
-
-      <div v-if="gameStarted">
-        <!--<p>🎯 Blæs i mikrofonen for at holde bolden i luften!</p>-->
-      </div>
+      <div v-if="calibrating"></div>
+      <div v-if="gameStarted"></div>
 
       <div v-if="errorMsg" class="error-message">
         <p><strong>Fejl:</strong> {{ errorMsg }}</p>
@@ -35,9 +29,9 @@ export default {
       calibrating: false,
       errorMsg: null,
 
-      // Lyd
       audioContext: null,
       analyser: null,
+      filter: null, // 🧩 NYT: Band-pass filter
       lowFrequencyEnergy: 0,
       highFrequencyEnergy: 0,
       combinedEnergy: 0,
@@ -45,34 +39,34 @@ export default {
       prevEnergy: 0,
       baselineReady: false,
 
-      // Pust-detektion
       isBlowing: false,
+      blowFrames: 0, // 🧩 NYT: Til vedvarende pust-detektion
+      blowThresholdFrames: 8, // Ca. 250–300 ms
       lastPuffTime: 0,
       puffCooldown: 400,
 
-      // Fysik
       ballX: 50,
       ballY: 10,
       velocityX: 0,
       velocityY: 0,
-      gravity: 0.2, // ÆNDRET: Lavere tyngdekraft, bolden falder langsommere
+      gravity: 0.2,
       bounceDamping: 0.75,
       airResistance: 0.92,
       ballRadius: 15,
 
-      // --- OPDATEREDE PARAMETRE ---
-      // FORBEDRET: Definerer frekvensbånd til analyse
-      lowHzStart: 300,   // Ignorerer den dybeste rumlen
+      lowHzStart: 300,
       lowHzEnd: 2000,
-      highHzStart: 2000, // Lavere start for at fange mere af "hvæset"
-      highHzEnd: 12000,  // Går lidt højere op
+      highHzStart: 2000,
+      highHzEnd: 12000,
 
-      // FORBEDRET: Tærskler for pust-detektion, gjort mere følsomme
-      puffThreshold: 5,      // Hvor meget energi over baseline kræves der?
-      onsetThreshold: 8,     // Hvor stor skal den pludselige stigning være?
-      balanceThreshold: 0.6, // Forholdet mellem høj- og lavfrekvent støj (et pust er ofte balanceret)
-      
-      // Animation
+      puffThreshold: 5,
+      onsetThreshold: 8,
+      balanceThreshold: 0.6,
+
+      // 🧩 NYT: Glidende gennemsnit
+      energyHistory: [], 
+      smoothWindow: 5,
+
       animationId: null,
       ballSetterX: null,
       ballSetterY: null,
@@ -108,11 +102,18 @@ export default {
         });
         const source = this.audioContext.createMediaStreamSource(stream);
 
+        // 🧩 NYT: Tilføj band-pass filter for at isolere pustefrekvenser
+        this.filter = this.audioContext.createBiquadFilter();
+        this.filter.type = "bandpass";
+        this.filter.frequency.value = 1500;
+        this.filter.Q.value = 1.5;
+
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 2048;
-        this.analyser.smoothingTimeConstant = 0.2;
+        this.analyser.smoothingTimeConstant = 0.3;
 
-        source.connect(this.analyser); // Direkte forbindelse
+        source.connect(this.filter);
+        this.filter.connect(this.analyser);
 
         this.calibrating = true;
         await this.measureBaseline();
@@ -138,15 +139,11 @@ export default {
         };
 
         const interval = setInterval(measure, 100);
-
         setTimeout(() => {
           clearInterval(interval);
-          if (samples.length === 0) {
-            this.baseline = 15;
-          } else {
-            const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
-            this.baseline = avg;
-          }
+          this.baseline = samples.length
+            ? samples.reduce((a, b) => a + b, 0) / samples.length
+            : 15;
           this.prevEnergy = this.baseline;
           console.log("✅ Kalibrering færdig. Baseline:", this.baseline.toFixed(1));
           resolve();
@@ -172,21 +169,27 @@ export default {
 
       const low = getAvgEnergy(this.lowHzStart, this.lowHzEnd);
       const high = getAvgEnergy(this.highHzStart, this.highHzEnd);
-      
+
       const timeDomainArray = new Uint8Array(this.analyser.fftSize);
       this.analyser.getByteTimeDomainData(timeDomainArray);
       let sumSquares = 0.0;
       for (const amplitude of timeDomainArray) {
-          const value = (amplitude / 128.0) - 1.0;
-          sumSquares += value * value;
+        const value = (amplitude / 128.0) - 1.0;
+        sumSquares += value * value;
       }
       const rms = Math.sqrt(sumSquares / timeDomainArray.length) * 500;
 
-      return {
-        low: low,
-        high: high,
-        combined: (low + high) / 2 + rms,
-      };
+      let combined = (low + high) / 2 + rms;
+
+      // 🧩 NYT: Glidende gennemsnit for at udjævne peaks
+      this.energyHistory.push(combined);
+      if (this.energyHistory.length > this.smoothWindow)
+        this.energyHistory.shift();
+      combined =
+        this.energyHistory.reduce((a, b) => a + b, 0) /
+        this.energyHistory.length;
+
+      return { low, high, combined };
     },
 
     setBallPosition(x, y) {
@@ -209,43 +212,43 @@ export default {
       this.setBallPosition(this.ballX, this.ballY);
     },
 
-    // --- OPDATERET LOGIK ---
     detectBlow(now, energies) {
-      this.baseline = this.baseline * 0.998 + energies.combined * 0.002;
-      
+      // 🧩 NYT: adaptiv baseline med langsom justering
+      this.baseline = this.baseline * 0.995 + energies.combined * 0.005;
+
       const energyAboveBaseline = energies.combined - this.baseline;
       const energyDelta = energies.combined - this.prevEnergy;
       this.prevEnergy = energies.combined;
 
-      if (now - this.lastPuffTime < this.puffCooldown) {
-        return false;
-      }
-      
+      const highToLowRatio = energies.low > 0 ? energies.high / energies.low : 0;
+      const isBalanced = highToLowRatio > this.balanceThreshold;
+      const hasMinimumEnergy = energies.low > 25 && energies.high > 20;
       const isSuddenOnset = energyDelta > this.onsetThreshold;
       const isEnergyHighEnough = energyAboveBaseline > this.puffThreshold;
 
-      const highToLowRatio = energies.low > 0 ? energies.high / energies.low : 0;
-      const isBalanced = highToLowRatio > this.balanceThreshold;
-      
-      const hasMinimumEnergy = energies.low > 25 && energies.high > 20;
+      const blowNow =
+        isEnergyHighEnough && isBalanced && hasMinimumEnergy && isSuddenOnset;
 
-      if (isSuddenOnset && isEnergyHighEnough && isBalanced && hasMinimumEnergy) {
+      // 🧩 NYT: kræv vedvarende pust
+      if (blowNow) {
+        this.blowFrames++;
+      } else {
+        this.blowFrames = Math.max(this.blowFrames - 1, 0);
+      }
+
+      const sustained = this.blowFrames >= this.blowThresholdFrames;
+
+      if (sustained && now - this.lastPuffTime > this.puffCooldown) {
         this.lastPuffTime = now;
-        console.log("💨 Pust detekteret!", {
-            delta: energyDelta.toFixed(1),
-            aboveBaseline: energyAboveBaseline.toFixed(1),
-            ratio: highToLowRatio.toFixed(2),
-            low: energies.low.toFixed(1),
-            high: energies.high.toFixed(1),
-        });
+        this.blowFrames = 0;
+        console.log("💨 Pust detekteret! (stabil)");
         return true;
       }
-      
+
       return false;
     },
 
     gameLoop() {
-      const maxHeight = 400;
       const minY = -200;
       const viewportBottom = -250;
 
@@ -259,9 +262,11 @@ export default {
 
         const blowDetected = this.detectBlow(now, energies);
 
-        if (blowDetected && this.ballY < maxHeight) {
-          // ÆNDRET: Kraften fra pustet er øget ved at dividere med et lavere tal
-          const force = Math.min((this.combinedEnergy - this.baseline) / 3, 15);
+        if (blowDetected) {
+          const force = Math.min(
+            (this.combinedEnergy - this.baseline) / 2.5,
+            20
+          );
           this.velocityY += force;
           this.velocityX += (Math.random() - 0.5) * 0.4;
         }
@@ -277,11 +282,6 @@ export default {
           this.velocityY = Math.abs(this.velocityY) * this.bounceDamping;
         }
 
-        if (this.ballY > maxHeight) {
-          this.ballY = maxHeight;
-          this.velocityY = 0;
-        }
-
         if (this.ballY < viewportBottom) this.spawnNewBall();
 
         this.setBallPosition(this.ballX, this.ballY);
@@ -293,6 +293,7 @@ export default {
 };
 </script>
 
+
 <style>
 #app {
   display: flex;
@@ -302,6 +303,7 @@ export default {
   font-family: sans-serif;
   text-align: center;
   position: relative;
+  border: #D8000C 1px solid;
 }
 .background {
   position: absolute;
