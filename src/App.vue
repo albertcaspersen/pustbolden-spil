@@ -41,7 +41,7 @@ export default {
 
       isBlowing: false,
       blowFrames: 0, // 🧩 NYT: Til vedvarende pust-detektion
-      blowThresholdFrames: 2, // Ca. 250–300 ms
+      blowThresholdFrames: 1, // Ca. 250–300 ms
       lastPuffTime: 0,
       puffCooldown: 400,
 
@@ -59,8 +59,8 @@ export default {
       highHzStart: 2000,
       highHzEnd: 12000,
 
-      puffThreshold: 2,
-      onsetThreshold: 4,
+      puffThreshold: 1,
+      onsetThreshold: 3,
       balanceThreshold: 0.6,
 
       // 🧩 NYT: Glidende gennemsnit
